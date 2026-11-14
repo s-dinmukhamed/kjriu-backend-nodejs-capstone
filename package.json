@@ -1,0 +1,16 @@
+{
+  "name": "secondchance-quality-checks",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "eslint secondChance-backend/app.js secondChance-backend/logger.js secondChance-backend/models secondChance-backend/routes secondChance-backend/test sentiment/index.js sentiment/logger.js",
+    "lint:fix": "npm run lint -- --fix"
+  },
+  "devDependencies": {
+    "eslint": "8.57.1",
+    "eslint-config-standard": "17.1.0",
+    "eslint-plugin-import": "2.29.1",
+    "eslint-plugin-n": "16.6.2",
+    "eslint-plugin-promise": "6.1.1"
+  }
+}

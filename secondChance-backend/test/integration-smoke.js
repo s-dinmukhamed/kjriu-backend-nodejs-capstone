@@ -1,0 +1,45 @@
+require('dotenv').config()
+const assert = require('node:assert/strict')
+const request = require('supertest')
+const app = require('../app')
+const connect = require('../models/db')
+const email = 'lab-' + Date.now() + '@example.test'
+const password = 'Lab-fixture-123!'
+let itemId, db
+let checks = 0
+const pass = name => { checks++; console.log('PASS ' + name) };
+(async () => {
+  db = await connect()
+  const list = await request(app).get('/api/secondchance/items').expect(200)
+  assert.ok(list.body.length >= 16); pass('list imported items')
+  const detail = await request(app).get('/api/secondchance/items/429').expect(200)
+  assert.equal(detail.body.name, 'Side Table'); pass('read item 429')
+  await request(app).get('/api/secondchance/items/not-existing').expect(404); pass('missing item')
+  const search = await request(app).get('/api/secondchance/search').query({ name: 'lamp', condition: 'New', age_years: 2 }).expect(200)
+  assert.ok(search.body.length); assert.ok(search.body.every(x => /lamp/i.test(x.name) && x.condition === 'New' && x.age_years <= 2)); pass('combined search filters')
+  const created = await request(app).post('/api/secondchance/items').send({ name: 'Temporary lab fixture', category: 'Office', age_days: 4, age_years: 0.01 }).expect(201)
+  itemId = created.body.id; assert.ok(itemId); pass('create item')
+  const updated = await request(app).put('/api/secondchance/items/' + itemId).send({ name: 'Updated lab fixture' }).expect(200)
+  assert.equal(updated.body.name, 'Updated lab fixture'); pass('update item')
+  await request(app).delete('/api/secondchance/items/' + itemId).expect(200)
+  await request(app).get('/api/secondchance/items/' + itemId).expect(404); itemId = null; pass('delete temporary item')
+  await request(app).post('/api/auth/register').send({ email: 'bad' }).expect(400); pass('registration validation')
+  const registration = await request(app).post('/api/auth/register').send({ firstName: 'Lab', lastName: 'Fixture', email, password }).expect(201)
+  assert.ok(registration.body.authtoken); pass('register user and JWT')
+  const user = await db.collection('users').findOne({ email })
+  assert.notEqual(user.password, password); assert.ok(await require('bcryptjs').compare(password, user.password)); pass('hashed password')
+  await request(app).post('/api/auth/register').send({ firstName: 'Lab', lastName: 'Fixture', email, password }).expect(409); pass('duplicate email')
+  await request(app).post('/api/auth/login').send({ email, password: 'incorrect' }).expect(401); pass('reject bad login')
+  const login = await request(app).post('/api/auth/login').send({ email, password }).expect(200)
+  assert.equal(login.body.userEmail, email); pass('login')
+  await request(app).put('/api/auth/update').send({ name: 'Updated' }).expect(401); pass('reject unauthenticated profile edit')
+  await request(app).put('/api/auth/update').set('Authorization', 'Bearer ' + login.body.authtoken).set('Email', 'someone-else@example.test').send({ name: 'Updated' }).expect(403); pass('reject another profile')
+  await request(app).put('/api/auth/update').set('Authorization', 'Bearer ' + login.body.authtoken).send({ name: 'Updated' }).expect(400); pass('require profile email header')
+  const profile = await request(app).put('/api/auth/update').set('Authorization', 'Bearer ' + login.body.authtoken).set('Email', email).send({ name: 'Updated' }).expect(200)
+  assert.ok(profile.body.authtoken)
+  assert.equal((await db.collection('users').findOne({ email })).firstName, 'Updated'); pass('update own profile')
+  console.log('VERIFIED: ' + checks + ' backend checks passed')
+})().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
+  if (db) { if (itemId) await db.collection('secondChanceItems').deleteOne({ id: itemId }); await db.collection('users').deleteOne({ email }) }
+  await connect.close()
+})
